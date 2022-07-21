@@ -20,18 +20,18 @@ struct FieldScalars {
     angle: f32,
 }
 
-/// Body statics for acceleration of some scalar
-struct VelocityStatic {
-    acc_scalar: f32,
-    linear_friction_scalar: f32,
-    constant_friction: f32,
-}
+// /// Body statics for acceleration of some scalar
+// struct VelocityStatic {
+//     acc_scalar: f32,
+//     linear_friction_scalar: f32,
+//     constant_friction: f32,
+// }
 
-/// VelocityStatic for {xy, angle}
-struct VelocityStatics {
-    xy: VelocityStatic,
-    angle: VelocityStatic,
-}
+// /// VelocityStatic for {xy, angle}
+// struct VelocityStatics {
+//     xy: VelocityStatic,
+//     angle: VelocityStatic,
+// }
 
 struct Tugger {
     relative_body_handle_xy: VecLa,
@@ -40,11 +40,13 @@ struct Tugger {
 
 /// A 2d shape in the game world
 struct Body {
-    statics: VelocityStatics,
+    // statics: VelocityStatics,
+    acc_scalar: f32,
+    rot_acc_scalar: f32,
     pos: FieldScalars,
     vel: FieldScalars,
     scale: VecXy,
-    tuggers: [Option<Tugger>; 3],
+    tuggers: [Option<Tugger>; 1],
     max_tug_handle_distance: f32,
 }
 
@@ -66,6 +68,7 @@ trait VecXyExt: Sized {
     fn split_parr_perp(self, other: Self) -> [Self; 2];
     fn with_length(self, length: f32) -> Self;
     fn reduce_length_saturating(self, by: f32) -> Self;
+    fn length_capped(self, at: f32) -> Self;
 }
 
 /////////////////////////////////
@@ -102,6 +105,14 @@ impl VecXyExt for VecXy {
     }
     fn reduce_length_saturating(self, by: f32) -> Self {
         self.with_length(self.length().toward_zero_saturating(by))
+    }
+    fn length_capped(self, cap: f32) -> Self {
+        let now = self.length();
+        if cap < now {
+            self * cap / now
+        } else {
+            self
+        }
     }
 }
 
@@ -158,8 +169,8 @@ impl Body {
         let [fr_parr, fr_perp] = fr.split_parr_perp(contact);
 
         FieldScalars {
-            xy: self.statics.xy.acc_scalar * (fu + fr.with_length(fr_parr.length())),
-            angle: self.statics.angle.acc_scalar
+            xy: fu + fr.with_length(fr_parr.length()),
+            angle: self.rot_acc_scalar
                 * fr_perp.length()
                 * if contact.angle_between(fr_perp) < 0. { -1. } else { 1. },
         }
@@ -171,60 +182,64 @@ impl MyGame {
         MyGame {
             bodies: [
                 Body {
-                    statics: VelocityStatics {
-                        xy: VelocityStatic {
-                            acc_scalar: 0.003,
-                            linear_friction_scalar: 0.99,
-                            constant_friction: 0.001,
-                        },
-                        angle: VelocityStatic {
-                            acc_scalar: 0.00009,
-                            linear_friction_scalar: 0.99,
-                            constant_friction: 0.0001,
-                        },
-                    },
+                    acc_scalar: 0.001,
+                    rot_acc_scalar: 0.1,
+                    // statics: VelocityStatics {
+                    //     xy: VelocityStatic {
+                    //         acc_scalar: 0.003,
+                    //         linear_friction_scalar: 0.99,
+                    //         constant_friction: 0.001,
+                    //     },
+                    //     angle: VelocityStatic {
+                    //         acc_scalar: 0.00009,
+                    //         linear_friction_scalar: 0.99,
+                    //         constant_friction: 0.0001,
+                    //     },
+                    // },
                     pos: FieldScalars { xy: VecXy::splat(300.), angle: 1. },
                     vel: FieldScalars { xy: VecXy::splat(0.), angle: 0. },
                     scale: VecXy::new(50., 50.),
                     tuggers: [
                         None,
-                        Some(Tugger {
-                            world_dest: VecXy::new(300., 280.),
-                            relative_body_handle_xy: VecLa { length: 7., angle: 2. },
-                        }),
-                        Some(Tugger {
-                            world_dest: VecXy::new(400., 220.),
-                            relative_body_handle_xy: VecLa { length: 9., angle: 2.4 },
-                        }),
+                        // Some(Tugger {
+                        //     world_dest: VecXy::new(300., 280.),
+                        //     relative_body_handle_xy: VecLa { length: 7., angle: 2. },
+                        // }),
+                        // Some(Tugger {
+                        //     world_dest: VecXy::new(400., 220.),
+                        //     relative_body_handle_xy: VecLa { length: 9., angle: 2.4 },
+                        // }),
                     ],
                     max_tug_handle_distance: 35.,
                 },
                 Body {
-                    statics: VelocityStatics {
-                        xy: VelocityStatic {
-                            acc_scalar: 0.002,
-                            linear_friction_scalar: 0.99,
-                            constant_friction: 0.001,
-                        },
-                        angle: VelocityStatic {
-                            acc_scalar: 0.00007,
-                            linear_friction_scalar: 0.99,
-                            constant_friction: 0.0001,
-                        },
-                    },
+                    // statics: VelocityStatics {
+                    //     xy: VelocityStatic {
+                    //         acc_scalar: 0.002,
+                    //         linear_friction_scalar: 0.99,
+                    //         constant_friction: 0.001,
+                    //     },
+                    //     angle: VelocityStatic {
+                    //         acc_scalar: 0.00007,
+                    //         linear_friction_scalar: 0.99,
+                    //         constant_friction: 0.0001,
+                    //     },
+                    // },
+                    acc_scalar: 0.01,
+                    rot_acc_scalar: 0.1,
                     pos: FieldScalars { xy: VecXy::splat(300.), angle: 1. },
                     vel: FieldScalars { xy: VecXy::splat(0.), angle: 0. },
                     scale: VecXy::new(80., 30.),
                     tuggers: [
                         None,
-                        Some(Tugger {
-                            world_dest: VecXy::new(450., 100.),
-                            relative_body_handle_xy: VecLa { length: 35., angle: 0.3 },
-                        }),
-                        Some(Tugger {
-                            world_dest: VecXy::new(510., 400.),
-                            relative_body_handle_xy: VecLa { length: 30., angle: 3.1 },
-                        }),
+                        // Some(Tugger {
+                        //     world_dest: VecXy::new(450., 100.),
+                        //     relative_body_handle_xy: VecLa { length: 35., angle: 0.3 },
+                        // }),
+                        // Some(Tugger {
+                        //     world_dest: VecXy::new(510., 400.),
+                        //     relative_body_handle_xy: VecLa { length: 30., angle: 3.1 },
+                        // }),
                     ],
                     max_tug_handle_distance: 80.,
                 },
@@ -295,26 +310,32 @@ impl EventHandler for MyGame {
                 .map(|tugger| {
                     let xy_relative_handle =
                         body.xy_relative_handle(tugger.relative_body_handle_xy);
-                    let force = tugger.world_dest - (xy_relative_handle + body.pos.xy);
+
+                    let min_ticks_to_stop = body.vel.xy.length() / body.acc_scalar;
+                    let rel_stop_at = body.vel.xy * min_ticks_to_stop * 0.5;
+                    let rel_target = tugger.world_dest - (body.pos.xy + xy_relative_handle);
+                    let force = (rel_target - rel_stop_at).length_capped(body.acc_scalar);
+
+                    // let force = tugger.world_dest - (xy_relative_handle + body.pos.xy);
                     body.tug_acc(xy_relative_handle, force)
                 })
                 .fold(FieldScalars::default(), FieldScalars::add);
 
-            //gravity
-            acc.xy.y += 0.15;
+            // //gravity
+            // acc.xy.y += 0.15;
 
             body.vel.add_from(&acc);
             // accelerate
             body.pos.add_from(&body.vel);
 
-            // linear friction
-            body.vel.xy *= body.statics.xy.linear_friction_scalar;
-            body.vel.angle *= body.statics.angle.linear_friction_scalar;
+            // // linear friction
+            // body.vel.xy *= body.statics.xy.linear_friction_scalar;
+            // body.vel.angle *= body.statics.angle.linear_friction_scalar;
 
-            // constant friction
-            body.vel.xy = body.vel.xy.reduce_length_saturating(body.statics.xy.constant_friction);
-            body.vel.angle =
-                body.vel.angle.toward_zero_saturating(body.statics.angle.constant_friction);
+            // // constant friction
+            // body.vel.xy = body.vel.xy.reduce_length_saturating(body.statics.xy.constant_friction);
+            // body.vel.angle =
+            //     body.vel.angle.toward_zero_saturating(body.statics.angle.constant_friction);
         }
         Ok(())
     }
