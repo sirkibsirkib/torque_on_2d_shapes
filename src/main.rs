@@ -18,35 +18,71 @@ struct VecLa {
     angle: f32,
 }
 
+struct VelocityStatic {
+    vel_scalar: f32,
+    friction_scalar: f32,
+}
+struct VelocityStatics {
+    xy: VelocityStatic,
+    angle: VelocityStatic,
+}
+
 struct Body {
-    translation_scalar: f32, // inverse of mass
-    rotation_scalar: f32,    // inverse of "angle mass"
+    statics: VelocityStatics,
     pos: FieldScalars,
     vel: FieldScalars,
     scale: VecXy,
-    handle: VecLa,
+    tug_handle: Option<VecLa>, //
+    max_tug_handle_distance: f32,
 }
 struct MyGame {
     rect_mash: Mesh,
     body: Body,
 }
-struct VecLaTug {
-    r: VecXy, // (point of force) - (center of mass)
-    f: VecXy, // force vector
+
+///
+struct Tug {
+    // e.g. https://en.wikipedia.org/wiki/Angular_momentum
+    contact: VecXy, // called "r". force application point relative to body's center of mass
+    force: VecXy,   // called "f"
 }
 
+trait NegIf: Sized {
+    fn neg_if(self, cond: bool) -> Self;
+}
+trait VecXyExt: Sized {
+    fn rotate(self, angle: f32) -> Self;
+    fn split_parr_perp(self, other: Self) -> [Self; 2];
+    fn with_length(self, length: f32) -> Self;
+}
 /////////////////////////////////
-
-fn rotate_vec_xy(xy: VecXy, angle: f32) -> VecXy {
-    let [sa, ca] = [angle.sin(), angle.cos()];
-    let [x, y] = xy.to_array();
-    VecXy::new(x * ca - y * sa, x * sa + y * ca)
+impl NegIf for f32 {
+    fn neg_if(self, cond: bool) -> Self {
+        if cond {
+            -self
+        } else {
+            self
+        }
+    }
 }
-
+impl VecXyExt for VecXy {
+    fn rotate(self, angle: f32) -> Self {
+        let [sa, ca] = [angle.sin(), angle.cos()];
+        let [x, y] = self.to_array();
+        Self::new(x * ca - y * sa, x * sa + y * ca)
+    }
+    fn split_parr_perp(self, other: Self) -> [Self; 2] {
+        let parr = self.project_onto(other);
+        let perp = self - parr;
+        [parr, perp]
+    }
+    fn with_length(self, length: f32) -> Self {
+        self.normalize() * length
+    }
+}
 fn main() {
-    let (mut ctx, event_loop) = ContextBuilder::new("my_game", "Cool Game Author")
-        .build()
-        .expect("aieee, could not create ggez context!");
+    let (mut ctx, event_loop) =
+        ContextBuilder::new("torque_on_2d_shapes", "Chris").build().expect("WAH!");
     let my_game = MyGame::new(&mut ctx);
     event::run(ctx, event_loop, my_game);
 }
@@ -58,26 +94,46 @@ impl FieldScalars {
     }
 }
 impl Body {
-    fn tug(&mut self, VecLaTug { r, f }: VecLaTug) {
-        let f_parr = f.project_onto(r);
-        let f_perp = f - f_parr;
-        // dbg!(f, r, f_parr, f_perp, r.angle_between(f_perp));
-        self.vel.angle += self.rotation_scalar
-            * f_perp.length()
-            * if r.angle_between(f_perp) > 0. { 1. } else { -1. };
+    fn tug(&mut self, Tug { contact, force: f }: Tug) {
+        if f == VecXy::ZERO {
+            // correct: zero force has no effect
+            // necessary: otherwise projection returns NaN
+            return;
+        }
 
-        self.vel.xy += self.translation_scalar * f_parr;
+        // split force vector up into [force rotatable, force unrotatable]
+        let [fu, fr]: [VecXy; 2] = {
+            let rotatable_proportion = contact.length() / self.max_tug_handle_distance;
+            assert!(0. <= rotatable_proportion);
+            assert!(rotatable_proportion <= 1.);
+            let fr = f * rotatable_proportion;
+            [f - fr, fr]
+        };
+
+        let [fr_parr, fr_perp] = fr.split_parr_perp(contact);
+        let angle_delta = self.statics.angle.vel_scalar
+            * fr_perp.length()
+            * if contact.angle_between(fr_perp) < 0. { -1. } else { 1. };
+
+        self.vel.angle += angle_delta;
+        self.vel.xy += self.statics.xy.vel_scalar * (fu + fr.with_length(fr_parr.length()));
     }
-    fn relative_handle_xy(&self) -> VecXy {
-        self.handle.rotated(self.pos.angle).to_xy()
+    fn relative_tug_handle_xy(&self) -> Option<VecXy> {
+        Some(self.tug_handle?.rotated(self.pos.angle).to_xy())
     }
-    fn handle_xy(&self) -> VecXy {
-        self.relative_handle_xy() + self.pos.xy
+    fn absolutify_relative_xy(&self, relative_xy: VecXy) -> VecXy {
+        self.pos.xy + relative_xy
+    }
+    fn relativize_absolute_xy(&self, absolute_xy: VecXy) -> VecXy {
+        absolute_xy - self.pos.xy
+    }
+    fn absolute_tug_handle_xy(&self) -> Option<VecXy> {
+        Some(self.absolutify_relative_xy(self.relative_tug_handle_xy()?))
     }
 }
 impl VecLa {
     fn to_xy(self) -> VecXy {
-        rotate_vec_xy(VecXy::new(self.length, 0.), self.angle)
+        VecXy::new(self.length, 0.).rotate(self.angle)
     }
     fn from_xy(xy: VecXy) -> Self {
         Self { length: xy.length(), angle: xy.y.atan2(xy.x) }
@@ -91,12 +147,15 @@ impl MyGame {
     pub fn new(ctx: &mut Context) -> MyGame {
         MyGame {
             body: Body {
-                translation_scalar: 0.001,
-                rotation_scalar: 0.00002,
+                statics: VelocityStatics {
+                    xy: VelocityStatic { vel_scalar: 0.003, friction_scalar: 0.985 },
+                    angle: VelocityStatic { vel_scalar: 0.00009, friction_scalar: 0.98 },
+                },
                 pos: FieldScalars { xy: VecXy::splat(300.), angle: 1. },
                 vel: FieldScalars { xy: VecXy::splat(0.), angle: 0. },
-                handle: VecLa { length: 24., angle: 3. },
                 scale: VecXy::splat(50.),
+                tug_handle: None,
+                max_tug_handle_distance: 35.,
             },
             rect_mash: Mesh::new_rectangle(
                 ctx,
@@ -109,14 +168,21 @@ impl MyGame {
     }
 }
 impl EventHandler for MyGame {
-    // fn mouse_button_down_event(&mut self, _ctx: &mut Context, button: MouseButton, x: f32, y: f32) {
-    //     let mouse_xy = VecXy::new(x, y);
-    //     if let MouseButton::Left = button {
-    //         let r = self.body.relative_handle_xy();
-    //         let f = mouse_xy - self.body.pos.xy;
-    //         self.body.tug(VecLaTug { r, f });
-    //     }
-    // }
+    fn mouse_button_down_event(&mut self, _ctx: &mut Context, button: MouseButton, x: f32, y: f32) {
+        if let MouseButton::Left = button {
+            let mouse_xy = VecXy::new(x, y);
+            let vec_la = VecLa::from_xy(self.body.relativize_absolute_xy(mouse_xy))
+                .rotated(-self.body.pos.angle);
+            if vec_la.length <= self.body.max_tug_handle_distance {
+                self.body.tug_handle = Some(vec_la);
+            }
+        }
+    }
+    fn mouse_button_up_event(&mut self, _ctx: &mut Context, button: MouseButton, _: f32, _: f32) {
+        if let MouseButton::Left = button {
+            self.body.tug_handle = None;
+        }
+    }
     fn key_down_event(
         &mut self,
         ctx: &mut Context,
@@ -133,19 +199,20 @@ impl EventHandler for MyGame {
         }
     }
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
-        let b = &mut self.body;
-
-        // yanking
         let mouse_xy = VecXy::from(ggez::input::mouse::position(ctx));
-        b.tug(VecLaTug { r: b.relative_handle_xy(), f: mouse_xy - b.pos.xy });
+        for body in [&mut self.body] {
+            // update velocity wrt tug
+            if let Some(contact) = body.relative_tug_handle_xy() {
+                let force = mouse_xy - body.absolutify_relative_xy(contact);
+                body.tug(Tug { contact, force });
+            }
+            // accelerate
+            body.pos.add_from(&body.vel);
 
-        // acceleration
-        b.pos.add_from(&b.vel);
-
-        //friction
-        b.vel.xy *= 0.99;
-        b.vel.angle *= 0.995;
-
+            // friction
+            body.vel.xy *= body.statics.xy.friction_scalar;
+            body.vel.angle *= body.statics.angle.friction_scalar;
+        }
         Ok(())
     }
 
@@ -169,24 +236,24 @@ impl EventHandler for MyGame {
             },
         )?;
 
-        // draw handle
-        let handle_xy = b.handle_xy();
-        let cord_la = VecLa::from_xy(handle_xy - VecXy::from(mouse_xy));
-        graphics::draw(
-            ctx,
-            &self.rect_mash,
-            DrawParam {
-                trans: Transform::Values {
-                    dest: handle_xy.into(),
-                    rotation: cord_la.angle,
-                    scale: VecXy::new(cord_la.length, 1.).into(),
-                    offset: VecXy::new(0.5, 0.).into(),
+        // draw tug_handle
+        if let Some(tug_handle_xy) = b.absolute_tug_handle_xy() {
+            let cord_la = VecLa::from_xy(tug_handle_xy - VecXy::from(mouse_xy));
+            graphics::draw(
+                ctx,
+                &self.rect_mash,
+                DrawParam {
+                    trans: Transform::Values {
+                        dest: tug_handle_xy.into(),
+                        rotation: cord_la.angle,
+                        scale: VecXy::new(cord_la.length, 1.).into(),
+                        offset: VecXy::new(0.5, 0.).into(),
+                    },
+                    color: Color::RED,
+                    ..Default::default()
                 },
-                color: Color::RED,
-                ..Default::default()
-            },
-        )?;
-
+            )?;
+        }
         graphics::present(ctx)
     }
 }

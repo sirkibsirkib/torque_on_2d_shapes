@@ -1,5 +1,5 @@
 [package]
-name = "torq"
+name = "torque_on_2d_shapes"
 version = "0.1.0"
 edition = "2021"
 
