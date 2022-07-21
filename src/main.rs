@@ -115,14 +115,14 @@ impl Body {
         }
 
         // split force vector up into [force rotatable, force unrotatable]
-        let [fu, fr]: [VecXy; 2] = {
+        let [fr, fu]: [VecXy; 2] = {
             // 0. when contact is at center of mass
             // 1. when contact is at max tug handle distance
             let rotatable_proportion = contact.length() / self.max_tug_handle_distance;
             assert!(0. <= rotatable_proportion);
             assert!(rotatable_proportion <= 1.);
             let fr = f * rotatable_proportion;
-            [f - fr, fr]
+            [fr, f - fr]
         };
 
         let [fr_parr, fr_perp] = fr.split_parr_perp(contact);
