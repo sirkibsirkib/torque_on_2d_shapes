@@ -20,7 +20,8 @@ struct VecLa {
 
 struct VelocityStatic {
     vel_scalar: f32,
-    friction_scalar: f32,
+    linear_friction_scalar: f32,
+    constant_friction: f32,
 }
 struct VelocityStatics {
     xy: VelocityStatic,
@@ -49,11 +50,13 @@ struct Tug {
 
 trait NegIf: Sized {
     fn neg_if(self, cond: bool) -> Self;
+    fn toward_zero_saturating(self, by: f32) -> Self;
 }
 trait VecXyExt: Sized {
     fn rotate(self, angle: f32) -> Self;
     fn split_parr_perp(self, other: Self) -> [Self; 2];
     fn with_length(self, length: f32) -> Self;
+    fn reduce_length_saturating(self, by: f32) -> Self;
 }
 /////////////////////////////////
 impl NegIf for f32 {
@@ -62,6 +65,13 @@ impl NegIf for f32 {
             -self
         } else {
             self
+        }
+    }
+    fn toward_zero_saturating(self, by: f32) -> Self {
+        if self >= 0. {
+            (self - by).max(0.)
+        } else {
+            (self + by).min(0.)
         }
     }
 }
@@ -77,7 +87,10 @@ impl VecXyExt for VecXy {
         [parr, perp]
     }
     fn with_length(self, length: f32) -> Self {
-        self.normalize() * length
+        self.normalize_or_zero() * length
+    }
+    fn reduce_length_saturating(self, by: f32) -> Self {
+        self.with_length(self.length().toward_zero_saturating(by))
     }
 }
 fn main() {
@@ -148,8 +161,16 @@ impl MyGame {
         MyGame {
             body: Body {
                 statics: VelocityStatics {
-                    xy: VelocityStatic { vel_scalar: 0.003, friction_scalar: 0.985 },
-                    angle: VelocityStatic { vel_scalar: 0.00009, friction_scalar: 0.98 },
+                    xy: VelocityStatic {
+                        vel_scalar: 0.003,
+                        linear_friction_scalar: 0.99,
+                        constant_friction: 0.001,
+                    },
+                    angle: VelocityStatic {
+                        vel_scalar: 0.00009,
+                        linear_friction_scalar: 0.99,
+                        constant_friction: 0.0001,
+                    },
                 },
                 pos: FieldScalars { xy: VecXy::splat(300.), angle: 1. },
                 vel: FieldScalars { xy: VecXy::splat(0.), angle: 0. },
@@ -209,9 +230,14 @@ impl EventHandler for MyGame {
             // accelerate
             body.pos.add_from(&body.vel);
 
-            // friction
-            body.vel.xy *= body.statics.xy.friction_scalar;
-            body.vel.angle *= body.statics.angle.friction_scalar;
+            // linear friction
+            body.vel.xy *= body.statics.xy.linear_friction_scalar;
+            body.vel.angle *= body.statics.angle.linear_friction_scalar;
+
+            // constant friction
+            body.vel.xy = body.vel.xy.reduce_length_saturating(body.statics.xy.constant_friction);
+            body.vel.angle =
+                body.vel.angle.toward_zero_saturating(body.statics.angle.constant_friction);
         }
         Ok(())
     }
