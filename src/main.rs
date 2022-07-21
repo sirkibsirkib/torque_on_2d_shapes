@@ -6,28 +6,34 @@ use ggez::{
 };
 use glam::Vec2 as VecXy;
 
-#[derive(Default, Debug)]
-struct FieldScalars {
-    xy: VecXy,
-    angle: f32,
-}
-
+/// 2D vector in length-angle form
 #[derive(Debug, Copy, Clone)]
 struct VecLa {
     length: f32,
     angle: f32,
 }
 
+/// generalization of {position, velocity, ...} of rotating 2d body
+#[derive(Default, Debug)]
+struct FieldScalars {
+    xy: VecXy,
+    angle: f32,
+}
+
+/// Body statics for acceleration of some scalar
 struct VelocityStatic {
-    vel_scalar: f32,
+    acc_scalar: f32,
     linear_friction_scalar: f32,
     constant_friction: f32,
 }
+
+/// VelocityStatic for {xy, angle}
 struct VelocityStatics {
     xy: VelocityStatic,
     angle: VelocityStatic,
 }
 
+/// A 2d shape in the game world
 struct Body {
     statics: VelocityStatics,
     pos: FieldScalars,
@@ -36,28 +42,27 @@ struct Body {
     tug_handle: Option<VecLa>, //
     max_tug_handle_distance: f32,
 }
+
+/// Game state
 struct MyGame {
     rect_mash: Mesh,
     body: Body,
 }
 
-///
-struct Tug {
-    // e.g. https://en.wikipedia.org/wiki/Angular_momentum
-    contact: VecXy, // called "r". force application point relative to body's center of mass
-    force: VecXy,   // called "f"
-}
-
+/// Utility functions for `f32` type. Workaround of orphan rule.
 trait NegIf: Sized {
     fn neg_if(self, cond: bool) -> Self;
     fn toward_zero_saturating(self, by: f32) -> Self;
 }
+
+/// Utility functions for `VecXy` type. Workaround of orphan rule.
 trait VecXyExt: Sized {
     fn rotate(self, angle: f32) -> Self;
     fn split_parr_perp(self, other: Self) -> [Self; 2];
     fn with_length(self, length: f32) -> Self;
     fn reduce_length_saturating(self, by: f32) -> Self;
 }
+
 /////////////////////////////////
 impl NegIf for f32 {
     fn neg_if(self, cond: bool) -> Self {
@@ -93,62 +98,7 @@ impl VecXyExt for VecXy {
         self.with_length(self.length().toward_zero_saturating(by))
     }
 }
-fn main() {
-    let (mut ctx, event_loop) =
-        ContextBuilder::new("torque_on_2d_shapes", "Chris").build().expect("WAH!");
-    let my_game = MyGame::new(&mut ctx);
-    event::run(ctx, event_loop, my_game);
-}
 
-impl FieldScalars {
-    fn add_from(&mut self, other: &Self) {
-        self.xy += other.xy;
-        self.angle += other.angle;
-    }
-}
-impl Body {
-    fn tug(&mut self, Tug { contact, force: f }: Tug) {
-        if f == VecXy::ZERO {
-            // correct: zero force has no effect
-            // necessary: otherwise projection returns NaN
-            return;
-        }
-
-        // split force vector up into [force rotatable, force unrotatable]
-        let [fr, fu]: [VecXy; 2] = {
-            // 0. when contact is at center of mass
-            // 1. when contact is at max tug handle distance
-            let rotatable_proportion = contact.length() / self.max_tug_handle_distance;
-            assert!(0. <= rotatable_proportion);
-            assert!(rotatable_proportion <= 1.);
-            let fr = f * rotatable_proportion;
-            [fr, f - fr]
-        };
-
-        // split rotatable force up into [parallel, perpindicular] components wrt contact
-        let [fr_parr, fr_perp] = fr.split_parr_perp(contact);
-
-        // accelerate xy with unrotatable and parallel component of rotatable
-        self.vel.xy += self.statics.xy.vel_scalar * (fu + fr.with_length(fr_parr.length()));
-
-        // accelerate angle with perpindicular component of rotatable
-        self.vel.angle += self.statics.angle.vel_scalar
-            * fr_perp.length()
-            * if contact.angle_between(fr_perp) < 0. { -1. } else { 1. };
-    }
-    fn relative_tug_handle_xy(&self) -> Option<VecXy> {
-        Some(self.tug_handle?.rotated(self.pos.angle).to_xy())
-    }
-    fn absolutify_relative_xy(&self, relative_xy: VecXy) -> VecXy {
-        self.pos.xy + relative_xy
-    }
-    fn relativize_absolute_xy(&self, absolute_xy: VecXy) -> VecXy {
-        absolute_xy - self.pos.xy
-    }
-    fn absolute_tug_handle_xy(&self) -> Option<VecXy> {
-        Some(self.absolutify_relative_xy(self.relative_tug_handle_xy()?))
-    }
-}
 impl VecLa {
     fn to_xy(self) -> VecXy {
         VecXy::new(self.length, 0.).rotate(self.angle)
@@ -161,18 +111,73 @@ impl VecLa {
         self
     }
 }
+
+impl FieldScalars {
+    fn add_from(&mut self, other: &Self) {
+        self.xy += other.xy;
+        self.angle += other.angle;
+    }
+}
+
+impl Body {
+    fn relative_tug_handle_xy(&self) -> Option<VecXy> {
+        Some(self.tug_handle?.rotated(self.pos.angle).to_xy())
+    }
+    fn absolutify_relative_xy(&self, relative_xy: VecXy) -> VecXy {
+        self.pos.xy + relative_xy
+    }
+    fn relativize_absolute_xy(&self, absolute_xy: VecXy) -> VecXy {
+        absolute_xy - self.pos.xy
+    }
+    fn absolute_tug_handle_xy(&self) -> Option<VecXy> {
+        Some(self.absolutify_relative_xy(self.relative_tug_handle_xy()?))
+    }
+
+    /// Inspired by https://en.wikipedia.org/wiki/Angular_momentum
+    /// contact: force application point relative to my center of mass
+    fn tug(&mut self, contact: VecXy, force: VecXy) {
+        if force == VecXy::ZERO {
+            // correct: zero force has no effect
+            // necessary: otherwise projection returns NaN
+            return;
+        }
+
+        // split force vector up into [force rotatable, force unrotatable]
+        let [fr, fu]: [VecXy; 2] = {
+            // 0. when contact is at center of mass
+            // 1. when contact is at max tug handle distance
+            let rotatable_proportion = contact.length() / self.max_tug_handle_distance;
+            assert!(0. <= rotatable_proportion);
+            assert!(rotatable_proportion <= 1.);
+            let fr = force * rotatable_proportion;
+            [fr, force - fr]
+        };
+
+        // split rotatable force up into [parallel, perpindicular] components wrt contact
+        let [fr_parr, fr_perp] = fr.split_parr_perp(contact);
+
+        // accelerate xy with unrotatable and parallel component of rotatable
+        self.vel.xy += self.statics.xy.acc_scalar * (fu + fr.with_length(fr_parr.length()));
+
+        // accelerate angle with perpindicular component of rotatable
+        self.vel.angle += self.statics.angle.acc_scalar
+            * fr_perp.length()
+            * if contact.angle_between(fr_perp) < 0. { -1. } else { 1. };
+    }
+}
+
 impl MyGame {
     pub fn new(ctx: &mut Context) -> MyGame {
         MyGame {
             body: Body {
                 statics: VelocityStatics {
                     xy: VelocityStatic {
-                        vel_scalar: 0.003,
+                        acc_scalar: 0.003,
                         linear_friction_scalar: 0.99,
                         constant_friction: 0.001,
                     },
                     angle: VelocityStatic {
-                        vel_scalar: 0.00009,
+                        acc_scalar: 0.00009,
                         linear_friction_scalar: 0.99,
                         constant_friction: 0.0001,
                     },
@@ -193,6 +198,7 @@ impl MyGame {
         }
     }
 }
+
 impl EventHandler for MyGame {
     fn mouse_button_down_event(&mut self, _ctx: &mut Context, button: MouseButton, x: f32, y: f32) {
         if let MouseButton::Left = button {
@@ -209,13 +215,7 @@ impl EventHandler for MyGame {
             self.body.tug_handle = None;
         }
     }
-    fn key_down_event(
-        &mut self,
-        ctx: &mut Context,
-        keycode: KeyCode,
-        _keymods: KeyMods,
-        repeat: bool,
-    ) {
+    fn key_down_event(&mut self, ctx: &mut Context, keycode: KeyCode, _: KeyMods, repeat: bool) {
         if repeat {
             return;
         }
@@ -230,7 +230,7 @@ impl EventHandler for MyGame {
             // update velocity wrt tug
             if let Some(contact) = body.relative_tug_handle_xy() {
                 let force = mouse_xy - body.absolutify_relative_xy(contact);
-                body.tug(Tug { contact, force });
+                body.tug(contact, force);
             }
             // accelerate
             body.pos.add_from(&body.vel);
@@ -250,7 +250,9 @@ impl EventHandler for MyGame {
     fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
         graphics::clear(ctx, Color::BLACK);
         let mouse_xy = ggez::input::mouse::position(ctx);
+
         let b = &self.body;
+
         // draw body
         graphics::draw(
             ctx,
@@ -287,4 +289,11 @@ impl EventHandler for MyGame {
         }
         graphics::present(ctx)
     }
+}
+
+fn main() {
+    let (mut ctx, event_loop) =
+        ContextBuilder::new("torque_on_2d_shapes", "Chris").build().expect("WAH!");
+    let my_game = MyGame::new(&mut ctx);
+    event::run(ctx, event_loop, my_game);
 }
