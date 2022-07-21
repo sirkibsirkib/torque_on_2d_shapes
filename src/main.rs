@@ -46,7 +46,7 @@ struct Body {
     pos: FieldScalars,
     vel: FieldScalars,
     scale: VecXy,
-    tuggers: [Option<Tugger>; 1],
+    tuggers: [Option<Tugger>; 2],
     max_tug_handle_distance: f32,
 }
 
@@ -182,8 +182,8 @@ impl MyGame {
         MyGame {
             bodies: [
                 Body {
-                    acc_scalar: 0.001,
-                    rot_acc_scalar: 0.1,
+                    acc_scalar: 0.2,
+                    rot_acc_scalar: 0.05,
                     // statics: VelocityStatics {
                     //     xy: VelocityStatic {
                     //         acc_scalar: 0.003,
@@ -201,10 +201,10 @@ impl MyGame {
                     scale: VecXy::new(50., 50.),
                     tuggers: [
                         None,
-                        // Some(Tugger {
-                        //     world_dest: VecXy::new(300., 280.),
-                        //     relative_body_handle_xy: VecLa { length: 7., angle: 2. },
-                        // }),
+                        Some(Tugger {
+                            world_dest: VecXy::new(300., 280.),
+                            relative_body_handle_xy: VecLa { length: 7., angle: 2. },
+                        }),
                         // Some(Tugger {
                         //     world_dest: VecXy::new(400., 220.),
                         //     relative_body_handle_xy: VecLa { length: 9., angle: 2.4 },
@@ -225,17 +225,17 @@ impl MyGame {
                     //         constant_friction: 0.0001,
                     //     },
                     // },
-                    acc_scalar: 0.01,
+                    acc_scalar: 0.2,
                     rot_acc_scalar: 0.1,
                     pos: FieldScalars { xy: VecXy::splat(300.), angle: 1. },
                     vel: FieldScalars { xy: VecXy::splat(0.), angle: 0. },
                     scale: VecXy::new(80., 30.),
                     tuggers: [
                         None,
-                        // Some(Tugger {
-                        //     world_dest: VecXy::new(450., 100.),
-                        //     relative_body_handle_xy: VecLa { length: 35., angle: 0.3 },
-                        // }),
+                        Some(Tugger {
+                            world_dest: VecXy::new(450., 100.),
+                            relative_body_handle_xy: VecLa { length: 35., angle: 0.3 },
+                        }),
                         // Some(Tugger {
                         //     world_dest: VecXy::new(510., 400.),
                         //     relative_body_handle_xy: VecLa { length: 30., angle: 3.1 },
@@ -321,8 +321,8 @@ impl EventHandler for MyGame {
                 })
                 .fold(FieldScalars::default(), FieldScalars::add);
 
-            // //gravity
-            // acc.xy.y += 0.15;
+            //gravity
+            acc.xy.y += 0.1;
 
             body.vel.add_from(&acc);
             // accelerate
