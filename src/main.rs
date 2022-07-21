@@ -125,13 +125,16 @@ impl Body {
             [fr, f - fr]
         };
 
+        // split rotatable force up into [parallel, perpindicular] components wrt contact
         let [fr_parr, fr_perp] = fr.split_parr_perp(contact);
-        let angle_delta = self.statics.angle.vel_scalar
+
+        // accelerate xy with unrotatable and parallel component of rotatable
+        self.vel.xy += self.statics.xy.vel_scalar * (fu + fr.with_length(fr_parr.length()));
+
+        // accelerate angle with perpindicular component of rotatable
+        self.vel.angle += self.statics.angle.vel_scalar
             * fr_perp.length()
             * if contact.angle_between(fr_perp) < 0. { -1. } else { 1. };
-
-        self.vel.angle += angle_delta;
-        self.vel.xy += self.statics.xy.vel_scalar * (fu + fr.with_length(fr_parr.length()));
     }
     fn relative_tug_handle_xy(&self) -> Option<VecXy> {
         Some(self.tug_handle?.rotated(self.pos.angle).to_xy())
